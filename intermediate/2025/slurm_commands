@@ -2,6 +2,11 @@
 # Export your cluster number as XX so it can be used as ${XX} later
 export XX=01
 
+# You should have one shared file system.  Uncomment the one that you have
+# export SHARED_FS=/mnt/beegfs/scratch
+# export SHARED_FS=/mnt/lustre/scratch
+export SHARED_FS=/gpfs/lci/scratch
+
 # Using Slurm 24.11.1 as installed on the VMs for 2025 Intermediate
 
 # To build Slurm and install Slum with the configuration below, the
@@ -39,10 +44,9 @@ rpmbuild -ta slurm-23.11.6.tar.bz2 \
 # directory to your scratch directory where all the nodes can access
 # them
 
-export SHARED_FS=/gpfs/lci/scratch
-# export SHARED_FS=/mnt/beegfs/scratch
 cp -a ~/rpmbuild/RPMS ${SHARED_FS}
 
+# Munge is used by Slurm for encrypted communication among the nodes.
 # Before installing and configuring Slurm, configure and start MUNGE.
 # On the head node, create the munge key and then copy to the compute 
 # nodes 
@@ -76,10 +80,12 @@ done
 
 
 # Install the RPMS needed for slurmdbd and slurmctld on the head node
+
 cd $SHARED_FS/RPMS/x86_64
 
 # NOTE:  you must install mailx so there is a /usr/bin/mail for Slurm to use
 #        or slurmctld will not start
+
 dnf install -y \
   mailx \
   ./slurm-24.11.1-1.el8.x86_64.rpm \
@@ -92,9 +98,8 @@ dnf install -y \
 
 # Install the RPMs needed on the compute nodes
 
-## Create a file wiht commands that can be executed on the compute nodes
-##   from the shared filesystem
-
+## Create a file with commands that can be run on the compute nodes
+##   from the shared filesystem.
 cat << __EOF__ > $SHARED_FS/install_slurm.sh
 cd $SHARED_FS/RPMS/x86_64
 dnf install -y \\
@@ -107,24 +112,26 @@ dnf install -y \\
   ./slurm-slurmd-24.11.1-1.el8.x86_64.rpm
 __EOF__
 
+## Run the script on your compute nodes
 for node in lci-compute-${XX}-1 lci-compute-${XX}-2 ; do
     ssh $node "bash $SHARED_FS/install_slurm.sh"
 done
 
-
 # On the head and compute nodes, create a Slurm system account with a
 # consistent uid:gid, uid == gid, uid == 890, which was chosen from a large
-# empty zone in UIDs
+# empty zone in UIDs.  Double check that it is available on yours with `id 890`
 
 # On head node: 
 adduser --system -m -u 890 -s /sbin/nologin -d /var/lib/slurm \
     -c "Slurm system account"  slurm
 
 # Now on compute nodes:
-adduser --system -m -s /sbin/nologin -d /var/lib/slurm \
-    -c "Slurm system account" -u 990 -g slurm slurm
+for node in lci-compute-${XX}-1 lci-compute-${XX}-2 ; do
+    ssh $node adduser --system -m -s /sbin/nologin -d /var/lib/slurm \
+        -c "Slurm system account" -u 990 -g slurm slurm
+done
 
-# On head node, install the packages needed for MariaDB:
+# On head node only, install the packages needed for MariaDB:
 dnf instally -y mariadb mariadb-server
 
 # Enable and start mariadb:
@@ -137,7 +144,7 @@ systemctl start mariadb
 #   - set the root password for the DB to be LCI2025Slurm
 #       to match the password on the line
 #           StoragePass=LCI2025Slurm
-#       in /etc/slurm/slurmdbd.conf
+#       in /etc/slurm/slurmdbd.conf, which you'll set below
 #   - remove anonymous users
 #   - disallow root logins remotely
 #   - remove test databases
@@ -149,9 +156,13 @@ mysql_secure_installation
 # Start the interactive mysql 'shell'
 mysql -p
 
+# Enter the mariadb commands to set up the slurm database user and database
+# This password must match that above
 MariaDB [(none)]> create user 'slurm'@'localhost' identified by 'LCI2025Slurm';
 MariaDB [(none)]> create user 'slurm'@'lci-head-XX-1' identified by 'LCI2025Slurm';
 MariaDB [(none)]> grant all on slurm_acct_db.* to 'slurm'@'localhost';
+
+# Note:  You must manually change XX to your cluster number here
 MariaDB [(none)]> grant all on slurm_acct_db.* to 'slurm'@'lci-head-XX-1';
 MariaDB [(none)]> create database slurm_acct_db;
 MariaDB [(none)]> exit;
@@ -164,7 +175,8 @@ cd /etc/slurm
 cp slurmdbd.conf.example slurmdbd.conf
 
 # ... and make sure there is a line for
-StoragePass=LCI2024Slurm
+# StoragePass=LCI2025Slurm
+# in /etc/slurm/slurmdb.conf
 
 # Change ownership/permissions on slurmdbd.conf:
 ## The slurm user must own it and be the only account that can read it
