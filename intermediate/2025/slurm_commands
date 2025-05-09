@@ -32,7 +32,7 @@ dnf install -y \
 
 wget https://download.schedmd.com/slurm/slurm-24.11.1.tar.bz2
 
-rpmbuild -ta slurm-23.11.6.tar.bz2 \
+rpmbuild -ta slurm-24.11.1.tar.bz2 \
   --with hdf5 \
   --with hwloc \
   --with lua \
